@@ -103,12 +103,16 @@ function parse_opts(){
 
 function check() {
     local cluster
-
+    startts=$(date +%s)
     cluster=$(grep cluster_name /etc/pve/corosync.conf | cut -d " " -f 4)
     map_vmids_to_host
     all=$(get_vm_ids "$QEMU_CONF_CLUSTER/*$EXT_CONF" "$LXC_CONF_CLUSTER/*$EXT_CONF")
     all=$(echo "$all" | tr ',' "\n")
+    if [ -n "$opt_influx_api_url" ]; then
+        echo "Logging to InfluxDB"
+    fi
     for id in $all; do
+        (( vmcount++ ))
         status=$(gaping $id)
         if [ $opt_debug -eq 1 ]; then
             echo "VM $id: $status"
@@ -119,6 +123,8 @@ function check() {
             do_run "$cmd"
         fi
     done
+    endts=$(date +%s)
+    echo "Took $(( endts - startts )) Seconds to check $vmcount VMs"
 }
 
 function gaping() {
