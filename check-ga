@@ -6,7 +6,8 @@
 
 LC_ALL="en_US.UTF-8"
 
-source "check-ga.config"
+conf=$(dirname "$0")"/check-ga.config"
+source "${conf}"
 
 name=$(basename "$0")
 declare -r NAME=$name
