@@ -90,7 +90,6 @@ function parse_opts(){
     if [ $opt_debug -eq 1 ]; then
         echo "============================================"
         echo "Proxmox check-ga: $VERSION";
-        echo "pid: $(cat /var/run/"$PROGNAME".pid)"
         echo "============================================"
         echo "Proxmox VE Version:"
 
@@ -104,13 +103,16 @@ function parse_opts(){
 
 function check() {
     local cluster
+
     cluster=$(grep cluster_name /etc/pve/corosync.conf | cut -d " " -f 4)
     map_vmids_to_host
     all=$(get_vm_ids "$QEMU_CONF_CLUSTER/*$EXT_CONF" "$LXC_CONF_CLUSTER/*$EXT_CONF")
     all=$(echo "$all" | tr ',' "\n")
     for id in $all; do
         status=$(gaping $id)
-        echo "VM $id: $status"
+        if [ $opt_debug -eq 1 ]; then
+            echo "VM $id: $status"
+        fi
         if [ -n "$opt_influx_api_url" ]; then
             influxlp="$opt_influx_ga_metrics,cluster=$cluster,vmid=$id value=$status"
             cmd="curl --request POST \"$opt_influx_api_url/v2/write?org=$opt_influx_org&bucket=$opt_influx_bucket&precision=ns\" --header \"Authorization: Token $opt_influx_token\" --header \"Content-Type: text/plain; charset=utf-8\" --header \"Accept: application/json\" --data-binary '$influxlp'"
