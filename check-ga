@@ -1,0 +1,185 @@
+#!/bin/bash
+
+# QEMU health checker for Proxmox Hypervisors.
+# Logs to InfluxDB
+# Author: Bastian Mäuser <bma@netz.org>        
+
+LC_ALL="en_US.UTF-8"
+
+source "check-ga.config"
+
+name=$(basename "$0")
+declare -r NAME=$name
+declare -r VERSION=0.8
+declare -r PROGNAME=${NAME%.*}
+declare -r PVE_DIR="/etc/pve"
+declare -r PVE_NODES="$PVE_DIR/nodes"
+declare -r QEMU='qemu-server'
+declare -r QEMU_CONF_CLUSTER="$PVE_NODES/*/$QEMU"
+declare -r EXT_CONF='.conf'
+
+#arrays
+declare -A -g pvnode
+
+declare -i opt_debug=0
+
+function usage(){
+   shift
+
+    if [ "$1" != "--no-logo" ]; then
+        cat << EOF
+ 
+ heck-ga v$VERSION
+
+EOF
+    fi
+
+    cat << EOF
+Tool to check GA health on  Proxmox VE  environments
+
+Usage:
+    $PROGNAME <COMMAND> [ARGS] [OPTIONS]
+    $PROGNAME help
+    $PROGNAME version
+ 
+Commands:
+    version              Show version program
+    help                 Show help program
+    check                Check all VM in Cluster for GA health
+
+Options:
+    --influxurl          Influx API url (e.g. --influxurl=https://your-influxserver.com/api/)
+    --influxorg          Influx Organization (e.g. --influxorg=your-org)
+    --influxtoken        Influx API token with write permission
+    --influxbucket       Influx Bucket to write to (e.g. --influxbucket=telegraf/autogen)
+Switches:
+    --debug              Show Debug Output
+
+Report bugs to <mephisto@mephis.to>
+
+EOF
+}
+
+
+function parse_opts(){
+#    local action=$1
+    shift
+
+    local args
+    args=$(getopt \
+           --options '' \
+           --longoptions=influxurl:,influxorg:,influxtoken:,influxbucket:,debug \
+           --name "$PROGNAME" \
+           -- "$@") \
+           || end_process 128
+
+    eval set -- "$args"
+
+    while true; do    
+      case "$1" in
+        --influxurl) opt_influx_api_url=$2; shift 2;;
+        --influxorg) opt_influx_org=$2; shift 2;;
+        --influxtoken) opt_influx_token=$2; shift 2;;
+        --influxbucket) opt_influx_bucket=$2; shift 2;;
+        --debug) opt_debug=1; shift;;
+        --) shift; break;;
+        *) break;;
+      esac
+    done
+
+    if [ $opt_debug -eq 1 ]; then
+        echo "============================================"
+        echo "Proxmox check-ga: $VERSION";
+        echo "pid: $(cat /var/run/"$PROGNAME".pid)"
+        echo "============================================"
+        echo "Proxmox VE Version:"
+
+        echo "$(pveversion)"
+
+        echo "============================================"
+    fi
+
+}
+
+
+function check() {
+    local cluster
+    cluster=$(grep cluster_name /etc/pve/corosync.conf | cut -d " " -f 4)
+    map_vmids_to_host
+    all=$(get_vm_ids "$QEMU_CONF_CLUSTER/*$EXT_CONF" "$LXC_CONF_CLUSTER/*$EXT_CONF")
+    all=$(echo "$all" | tr ',' "\n")
+    for id in $all; do
+        status=$(gaping $id)
+        echo "VM $id: $status"
+        if [ -n "$opt_influx_api_url" ]; then
+            influxlp="$opt_influx_ga_metrics,cluster=$cluster,vmid=$id value=$status"
+            cmd="curl --request POST \"$opt_influx_api_url/v2/write?org=$opt_influx_org&bucket=$opt_influx_bucket&precision=ns\" --header \"Authorization: Token $opt_influx_token\" --header \"Content-Type: text/plain; charset=utf-8\" --header \"Accept: application/json\" --data-binary '$influxlp'"
+            do_run "$cmd"
+        fi
+    done
+}
+
+function gaping() {
+    local vmid=$1
+    local rc
+    cmd="ssh root@${pvnode[$vmid]} qm guest cmd $vmid ping >/dev/null 2>&1"
+    do_run "$cmd"
+    rc=$?
+    echo $rc
+}
+
+function map_vmids_to_host(){
+    local node
+    local vm
+    for node in $(/usr/bin/pvecm nodes | tail +5 | tr -s ' ' | cut -d' ' -f 4)
+    do
+        for vm in $(ssh root@$node qm list|tail +2|tr -s ' '|cut -f 2 -d' ')
+        do
+            pvnode[$vm]=$node
+        done
+    done
+}
+function get_vm_ids(){
+    local data=''
+    local conf=''
+
+    while [ $# -gt 0 ]; do
+        for conf in $1; do
+            [ ! -e "$conf" ] && break
+
+            conf=$(basename "$conf")
+            [ "$data" != '' ] && data="$data,"
+            data="$data${conf%.*}"
+        done
+        shift
+    done
+
+    echo "$data"
+}
+
+function do_run(){
+    local cmd=$*;
+    local -i rc=0;
+
+    eval "$cmd"
+    rc=$?
+    return $rc
+}
+
+
+function main(){    
+    parse_opts "$@"
+#    [ $# = 0 ] && usage;
+
+    #command
+    case "$1" in
+        version) echo "$VERSION";;
+        help) usage "$@";;
+        check) check "$@";;
+        *) usage;;
+    esac
+
+    exit 0;
+}
+
+main "$@"

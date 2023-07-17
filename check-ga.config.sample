@@ -1,0 +1,6 @@
+# InfluxDB 2 config
+declare opt_influx_api_url=''
+declare opt_influx_org=''
+declare opt_influx_token=''
+declare opt_influx_bucket=''
+declare opt_influx_ga_metrics='ga_health'
