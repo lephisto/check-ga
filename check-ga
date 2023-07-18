@@ -19,9 +19,13 @@ declare -r QEMU='qemu-server'
 declare -r QEMU_CONF_CLUSTER="$PVE_NODES/*/$QEMU"
 declare -r EXT_CONF='.conf'
 
+#regexes
+declare -r restripsnapshots='/^$/,$d'
+
 #arrays
 declare -A -g pvnode
 
+#params
 declare -i opt_debug=0
 
 function usage(){
@@ -114,12 +118,13 @@ function check() {
     fi
     for id in $all; do
         (( vmcount++ ))
+        vmname=$(cat $PVE_NODES/"${pvnode[$id]}"/$QEMU/"$id".conf | sed -e ''$restripsnapshots'' | grep "name\:" | cut -d' ' -f 2)
         status=$(gaping $id)
         if [ $opt_debug -eq 1 ]; then
-            echo "VM $id: $status"
+            echo "VM $id Name $vmname: $status"
         fi
         if [ -n "$opt_influx_api_url" ]; then
-            influxlp="$opt_influx_ga_metrics,cluster=$cluster,vmid=$id value=$status"
+            influxlp="$opt_influx_ga_metrics,cluster=$cluster,vmid=$id,vmname=$vmname value=$status"
             cmd="curl --request POST \"$opt_influx_api_url/v2/write?org=$opt_influx_org&bucket=$opt_influx_bucket&precision=ns\" --header \"Authorization: Token $opt_influx_token\" --header \"Content-Type: text/plain; charset=utf-8\" --header \"Accept: application/json\" --data-binary '$influxlp'"
             do_run "$cmd"
         fi
